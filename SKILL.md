@@ -86,7 +86,13 @@ The preview is **read-only and for hunting only**. Fixes still branch off the re
 
 ## Phase 1: Hunt (parallel explore agents)
 
-Point the hunters at the preview worktree if there is one, otherwise at the main checkout. Split the codebase into 4–5 non-overlapping areas, for example server methods/API, UI templates/components, shared utils/modules, i18n plus emails/notifications, jobs/integrations. Spawn one read-only explore agent per area **in the same turn**. Ask each for ~6 confirmed findings ranked by confidence, each with `file:line`, the exact snippet, why it's a bug (1–2 sentences) and the proposed 1–3 line fix.
+Point the hunters at the preview worktree if there is one, otherwise at the main checkout (`<checkout>` below). The areas are the 4–5 non-overlapping ones given to `round start`, for example server methods/API, UI templates/components, shared utils/modules, i18n plus emails/notifications, jobs/integrations. Before any hunter:
+
+1. `kb.py -C <checkout> rules run <checkout> --scratch $SCRATCH` runs the private rules (see Phase 4) and writes their hits to `$SCRATCH/rule-candidates.json`. They are candidates with `source` `rule:<id>`, nothing more: they go through `check` and your verification with the hunters' ones.
+2. `kb.py hotspots --base <base> > $SCRATCH/hotspots.json`: the files that changed most in the last 90 days (formatter sweeps, lockfiles, docs and tests left out), weighted by past bugs.
+3. `kb.py hunters --hot-from $SCRATCH/hotspots.json` plans the hunters (5 by default): `explore` lists the areas the exploration hunters take (the ones hunted least recently, so every area comes round), `hot` one list of files per hot-file hunter, `kind` (once there are enough results) one list of bug kinds per kind-focused hunter. In a memory-off round every hunter explores.
+
+Spawn one read-only explore agent per entry of the plan **in the same turn**: an exploration hunter per area, a hot-file hunter per file list (hunting those files and what they call), a kind hunter per kind list (hunting the whole checkout for those kinds only, with each kind's description from below and `kb.py patterns <kind>`). Paste `kb.py brief --role hunter` into every prompt, and for a hot-file hunter `kb.py brief --role hunter --hot-from <a file with its list>`; it is empty in a memory-off round. Ask each for ~6 confirmed findings ranked by confidence, each with `file:line`, the exact snippet, why it's a bug (1–2 sentences) and the proposed 1–3 line fix. Give each candidate the `source` of its hunter: `hunter:explore`, `hunter:hot` or `hunter:kind`, and the `area` for an exploration hunter.
 
 Tell them what counts. Good: missing `await` whose result is used, Promise used as a boolean, missing `return` after an error callback, wrong argument order to a library call (verify against the **installed** library source, not memory), `!== null` that misses `undefined`, wrong i18n key or namespace, typos in user-visible text, `<label for>` pointing at an id that doesn't exist, wrong log level or a dropped log context. Not good: style nits, refactors, anything that needs a product decision.
 
@@ -94,7 +100,7 @@ Two traps to tell them about:
 - A missing `await` on a path that writes data or calls an external service (Stripe, email, SMS) can re-enable a flow that has silently been broken for months. Before listing it, check the method's auth check and what side effects the fixed path now has. If it's unauthenticated or does irreversible work, it's a security or product issue, not a candidate for this batch.
 - Verify that the **fix** works against the installed library, not just that the bug is real. Example: URL-encoding a query param doesn't help if the router decodes it twice.
 
-Collect every hunter's candidates into one JSON list (`$SCRATCH/candidates.json`: `kind`, `root_cause`, `path`, `snippet` as it is in the file, `source`, plus `symbol` and `area` when known) and run `kb.py -C <the checkout they hunted> check $SCRATCH/candidates.json`. `kind` is one of `kb.py kinds`, or `new:<slug>` for a bug of none of them (`kb.py patterns <kind>` lists the root-cause slugs already used; reuse one for `pattern` when it fits). `source` is `hunter:explore` for now. Per candidate it answers:
+Collect the rule hits and every hunter's candidates into one JSON list (`$SCRATCH/candidates.json`: `kind`, `root_cause`, `path`, `snippet` as it is in the file, `source`, plus `pattern`, `symbol` and `area` when known) and run `kb.py -C <checkout> check $SCRATCH/candidates.json`. `kind` is one of `kb.py kinds`, or `new:<slug>` for a bug of none of them. `pattern` is `<kind>/<short root-cause slug>`; `kb.py patterns <kind>` lists the ones already used, so reuse one when it fits: rules are built per pattern. Per candidate it answers:
 - `strong`: already shipped in an open PR, or already dropped for a reason that still holds (same file, same snippet, same surrounding code). Skip it; record it as `dropped:duplicate` at phase 1 with the note as the reason, and list these in the phase update as "skipped as known".
 - `weak`: something related is known (`reintroduced`, `sibling of`, `seen before`, `related`). Verify it as new, with the earlier record (`kb.py show '#<id>'`) next to it. A `reintroduced` bug came back after a merged fix: worth a line in its PR's background. A `sibling` is usually a real separate copy of a bug.
 - `miss`: nothing known.
@@ -131,7 +137,7 @@ Afterwards, verify with one loop over the worktrees: commit count vs. base (expe
 
 Spawn three read-only general agents in the same turn, each reviewing **all** fixes (`git -C <wt> show HEAD`) with a different bias:
 
-1. **Skeptical prosecutor**: assume each bug is fake until the code proves otherwise. Check the installed library source (does the logger already wrap a bare Error? does the i18n lib already fall back to the page language?).
+1. **Skeptical prosecutor**: assume each bug is fake until the code proves otherwise. Check the installed library source (does the logger already wrap a bare Error? does the i18n lib already fall back to the page language?). Its prompt gets `kb.py brief --role prosecutor`: what earlier rounds found not to be bugs here.
 2. **Regression hunter**: what does production do differently now? Look for newly-enabled guards that block legit input, errors that now surface with misleading messages, a filter that "matched nothing" now "matching everything" (dangerous on messaging audiences), duplicate DOM ids, and sibling lines with the same bug that were left unfixed.
 3. **Reachability and intent**: is the code reachable (routes, template inclusions, callers, cron jobs), or dead? Was the behavior intended? This agent also checks phase 4's "introduced in" commits if they exist by then.
 
@@ -176,6 +182,14 @@ Add it to each PR description where the repository's template has room for backg
 - several commits: a `| Commit | Why |` table
 
 Record the commit you settled on: `kb.py update NN --introduced-in <hash>`.
+
+Then tend the private rules. They live only in the data folder, run before every hunt, and need no approval:
+
+1. `kb.py rules health` recounts each rule's results and turns off any rule whose hits are mostly not merged (below 50% after 4 decided).
+2. `kb.py rules candidates` lists the root-cause patterns with 2+ merged fixes (or 3+ seeds) and no rule yet, with their source snippets. For each, draft `$SCRATCH/rules/<id>.json` (the format is in the `scripts/kblib/rules.py` header): an `ast-grep` rule for code, an `html-regex` rule for templates (with `unless` for "an id that is not in the file"), the root cause as `message`, the source finding ids, one `must_match` and one `must_not_match` example. Keep it as narrow as the sources: a rule that flags half the codebase costs more than it finds.
+3. `kb.py rules add $SCRATCH/rules/<id>.json --scratch $SCRATCH` tests it (both examples and every source must behave) and saves it, or says why not. Fix the draft or give up on that pattern; never loosen the test.
+
+When a remembered lesson turns out wrong (a "known not-bug" that is a bug after all), retire it: `kb.py supersede '#<id>'` (`--by '#<new id>'` when a newer finding replaces it).
 
 ## Phase 5: Publish (ask first)
 

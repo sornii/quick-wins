@@ -24,7 +24,7 @@ Yours, in the repository you run it on. There is nothing to configure. Before it
 
 - `git` and `gh`, signed in to the repository being swept
 - `python3` with Pillow, for `scripts/annotate.py`
-- Node.js, for the Playwright checks in phase 3.5 (Playwright itself is installed per run, in the scratch directory)
+- Node.js, for the Playwright checks in phase 3.5 and for ast-grep rules (Playwright and `@ast-grep/cli` are installed per run, in the scratch directory)
 
 ## What it remembers
 
