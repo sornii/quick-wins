@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from kblib import brief, check, findings, hotspots, ingest, rules, seed, stats, store, sync  # noqa: E402
+from kblib import brief, check, findings, hotspots, ingest, promotions, rules, seed, stats, store, sync  # noqa: E402
 
 
 def read_json(path):
@@ -167,6 +167,11 @@ def cmd_rules(args):
             print(f'{r["id"]} [{state}] {r["kind"]}: hits {r["hits"]}, merged {r["merged"]}/{r["decided"]} decided')
 
 
+def cmd_promotions(args):
+    conn = store.connect(args.repo)
+    print(promotions.format_promotions(promotions.promotions(conn, store.load_config(args.repo))), end='')
+
+
 def cmd_list(args):
     conn = store.connect(args.repo)
     verify = set(args.verify.split(',')) if args.verify else None
@@ -281,6 +286,9 @@ def build_parser():
     s.add_argument('target', nargs='?', help='test/add: the rule file; run: the checkout to scan')
     s.add_argument('--scratch', help='the run scratch directory (rule hits and ast-grep cache go there)')
     s.set_defaults(func=cmd_rules)
+
+    s = sub.add_parser('promotions', help='lessons proven enough to propose: repo rule, docs note, skill change')
+    s.set_defaults(func=cmd_promotions)
 
     s = sub.add_parser('list', help="this round's findings, grouped by kind")
     s.add_argument('--runners-up', action='store_true')
