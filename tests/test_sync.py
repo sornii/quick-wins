@@ -36,7 +36,7 @@ class SyncTest(DataDirCase, unittest.TestCase):
         with fake_gh(self, self.respond({41: pr('MERGED', oid='a' * 40), 42: pr('CLOSED', reviews=['We want this.']),
                                          43: pr('OPEN')})) as calls:
             counts = sync.sync(self.conn, self.repo, 'main')
-        self.assertEqual(counts, {'merged': 1, 'closed': 1, 'reverted': 0, 'pending': 1})
+        self.assertEqual(counts, {'merged': 1, 'closed': 1, 'reverted': 0, 'pending': 1, 'unresolved': 0})
         self.assertEqual(self.row('01')['outcome'], 'merged')
         self.assertEqual(self.row('01')['merge_commit'], 'a' * 40)
         self.assertEqual(self.row('02')['outcome'], 'closed')
@@ -66,6 +66,36 @@ class SyncTest(DataDirCase, unittest.TestCase):
                                          43: pr('OPEN')})):
             sync.sync(self.conn, self.repo, 'main')
         self.assertEqual(self.row('01')['outcome'], 'reverted')
+
+    def test_revert_title_needs_exact_match(self):
+        commit(self.repo, 'a.js', 'x\n', 'Revert "Fix label for the signup form"')
+        publish(self.repo)
+        with fake_gh(self, self.respond({41: pr('MERGED', title='Fix label', oid='c' * 40), 42: pr('OPEN'),
+                                         43: pr('OPEN')})):
+            sync.sync(self.conn, self.repo, 'main')
+        self.assertEqual(self.row('01')['outcome'], 'merged')
+
+    def test_revert_title_of_squash_merge(self):
+        commit(self.repo, 'a.js', 'x\n', 'Revert "Fix label (#41)"')
+        publish(self.repo)
+        with fake_gh(self, self.respond({41: pr('MERGED', title='Fix label', oid='c' * 40), 42: pr('OPEN'),
+                                         43: pr('OPEN')})):
+            sync.sync(self.conn, self.repo, 'main')
+        self.assertEqual(self.row('01')['outcome'], 'reverted')
+
+    def test_partial_errors_apply_the_rest(self):
+        body = {'data': {'r0': {'p41': pr('MERGED', oid='a' * 40), 'p42': None, 'p43': pr('OPEN')}},
+                'errors': [{'message': 'Could not resolve to a PullRequest with the number of 42.'}]}
+        with fake_gh(self, {'graphql': {'__exit': 1, '__stdout': body}}):
+            counts = sync.sync(self.conn, self.repo, 'main')
+        self.assertEqual(counts, {'merged': 1, 'closed': 0, 'reverted': 0, 'pending': 1, 'unresolved': 1})
+        self.assertEqual(self.row('02')['outcome'], 'shipped')
+
+    def test_closed_reason_hides_handles(self):
+        with fake_gh(self, self.respond({41: pr('CLOSED', reviews=['@alice-b we want this, cc @bob']),
+                                         42: pr('OPEN'), 43: pr('OPEN')})):
+            sync.sync(self.conn, self.repo, 'main')
+        self.assertEqual(self.row('01')['reason'], '@someone we want this, cc @someone')
 
     def test_gh_failure_changes_nothing(self):
         with fake_gh(self, None):
@@ -97,7 +127,7 @@ class SyncTest(DataDirCase, unittest.TestCase):
         with fake_gh(self, self.respond({41: pr('OPEN'), 42: pr('OPEN'), 43: pr('OPEN')})):
             r = run_kb('sync', '--base', 'main', cwd=self.repo)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(json.loads(r.stdout), {'merged': 0, 'closed': 0, 'reverted': 0, 'pending': 3})
+        self.assertEqual(json.loads(r.stdout), {'merged': 0, 'closed': 0, 'reverted': 0, 'pending': 3, 'unresolved': 0})
 
 
 if __name__ == '__main__':

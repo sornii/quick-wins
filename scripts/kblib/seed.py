@@ -41,8 +41,12 @@ def excluded_paths(paths):
 
 
 def _git(repo_dir, *args):
-    r = subprocess.run(['git', '-C', repo_dir, *args], capture_output=True, text=True)
+    r = subprocess.run(['git', '-c', 'core.quotePath=false', '-C', repo_dir, *args], capture_output=True, text=True)
     if r.returncode != 0:
+        missing = any(s in r.stderr for s in ('unknown revision', 'bad revision', 'ambiguous argument'))
+        refs = [a for a in args if a.startswith('origin/')]
+        if missing and refs:
+            raise store.KbError(f'{refs[0]} not found; run `git fetch` first')
         raise store.KbError(f'git {args[0]}: {r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "failed"}')
     return r.stdout
 
@@ -109,12 +113,17 @@ def load(conn, repo_dir, scratch):
             entries = json.load(open(path))
         except json.JSONDecodeError as e:
             raise store.KbError(f'{path}: {e}')
+        seen = _seen(conn)
         for e in entries:
             if e.get('commit') not in asked:
                 raise store.KbError(f'{path}: {e.get("commit")!r} is not in any batch')
-        items = [{'kind': e['kind'], 'pattern': e.get('pattern'), 'root_cause': e['root_cause'], 'path': e['path'],
-                  'snippet': e['snippet'], 'source': 'seed', 'outcome': 'seed', 'seed_commit': e['commit'],
-                  'base_sha': e['commit']} for e in entries if not e.get('skip')]
+        entries = [e for e in entries if e['commit'] not in seen]
+        try:
+            items = [{'kind': e['kind'], 'pattern': e.get('pattern'), 'root_cause': e['root_cause'],
+                      'path': e['path'], 'snippet': e['snippet'], 'source': 'seed', 'outcome': 'seed',
+                      'seed_commit': e['commit'], 'base_sha': e['commit']} for e in entries if not e.get('skip')]
+        except KeyError as e:
+            raise store.KbError(f'{path}: an answer lacks {e.args[0]!r} (and is not "skip": true)')
         findings.add_findings(conn, repo_dir, None, items)
         conn.executemany('INSERT OR IGNORE INTO seed_seen (commit_sha, skipped, seen) VALUES (?, ?, ?)',
                          [(e['commit'], 1 if e.get('skip') else 0, store.now()) for e in entries])

@@ -28,7 +28,7 @@ Yours, in the repository you run it on. There is nothing to configure. Before it
 
 ## What it remembers
 
-Every finding and what became of it (merged, closed, reverted, or dropped and why), in one SQLite file per repository under `~/.local/share/quick-wins/<host_owner_name>/`, read and written by `scripts/kb.py`. It is seeded from the repository's own small fix commits on the first run. It stores code snippets, diffs, commit hashes and PR numbers, never who wrote what. Settings are in `config.json` next to it; delete the folder to start a repository over.
+Every finding and what became of it (merged, closed, reverted, or dropped and why), in one SQLite file per repository under `~/.local/share/quick-wins/<host_owner_name>/`, read and written by `scripts/kb.py`. It is seeded from the repository's own small fix commits on the first run. It stores code snippets, diffs, commit hashes and PR numbers, never who wrote what. Settings are in `config.json` next to it; delete the folder to start a repository over. Where `XDG_DATA_HOME` is set, the folder is `$XDG_DATA_HOME/quick-wins/` instead.
 
 ## Changing it
 

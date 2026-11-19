@@ -18,16 +18,18 @@ def _gh_graphql(query):
         r = subprocess.run(['gh', 'api', 'graphql', '-f', 'query=' + query], capture_output=True, text=True)
     except FileNotFoundError:
         raise SyncError('sync skipped: gh is not installed')
-    if r.returncode != 0:
+    try:
+        data = json.loads(r.stdout) if r.stdout.strip() else {}
+    except json.JSONDecodeError:
+        data = {}
+    if not isinstance(data, dict) or (r.returncode != 0 and not data.get('data')):
         lines = r.stderr.strip().splitlines()
         raise SyncError('sync skipped: ' + (lines[-1] if lines else f'gh exited {r.returncode}'))
-    try:
-        data = json.loads(r.stdout)
-    except json.JSONDecodeError:
-        raise SyncError('sync skipped: gh returned something that is not JSON')
-    if data.get('errors'):
-        raise SyncError('sync skipped: ' + str(data['errors'][0].get('message', data['errors'][0])))
-    return data.get('data') or {}
+    if not data.get('data'):
+        err = (data.get('errors') or [{}])[0]
+        raise SyncError('sync skipped: ' + str(err.get('message', err) or 'no data'))
+    # partial errors (a deleted repository, a PR that no longer exists) leave those nodes null
+    return data['data']
 
 
 def _owner_name(row, origin):
@@ -42,7 +44,7 @@ def _owner_name(row, origin):
 def _reason(node):
     bodies = [n['body'].strip() for part in ('reviews', 'comments') for n in (node.get(part) or {}).get('nodes', [])
               if n.get('body') and n['body'].strip()]
-    text = ' | '.join(bodies)
+    text = re.sub(r'(?<![\w.])@[A-Za-z0-9][\w-]*', '@someone', ' | '.join(bodies))
     return (text[:497] + '...') if len(text) > 500 else (text or 'closed without comment')
 
 
@@ -60,15 +62,14 @@ def _fetch(rows, origin):
     out = {}
     for fid, (repo_alias, pr_alias) in where.items():
         node = (data.get(repo_alias) or {}).get(pr_alias)
-        if node is None:
-            raise SyncError(f'sync skipped: GitHub returned nothing for finding #{fid}')
-        out[fid] = node
+        if node is not None:
+            out[fid] = node
     return out
 
 
 def _base_log(repo_dir, base):
-    r = subprocess.run(['git', '-C', repo_dir, 'log', f'origin/{base}', '--format=%H%x00%s%x00%b%x1e'],
-                       capture_output=True, text=True)
+    r = subprocess.run(['git', '-C', repo_dir, 'log', f'origin/{base}', '--grep=This reverts commit', '--grep=^Revert "',
+                        '--format=%H%x00%s%x00%b%x1e'], capture_output=True, text=True)
     if r.returncode != 0:
         return []
     out = []
@@ -80,10 +81,11 @@ def _base_log(repo_dir, base):
 
 
 def _reverted(log, merge_commit, title):
+    by_title = re.compile(r'^Revert "' + re.escape(title) + r'( \(#\d+\))?"( \(#\d+\))?$') if title else None
     for _sha, subject, body in log:
         if merge_commit and f'This reverts commit {merge_commit}' in body:
             return True
-        if title and subject.startswith(f'Revert "{title}'):
+        if by_title and by_title.match(subject):
             return True
     return False
 
@@ -93,10 +95,13 @@ def sync(conn, repo_dir, base):
     origin = store.parse_remote(url.stdout) if url.returncode == 0 else None
     shipped = conn.execute("SELECT * FROM findings WHERE outcome = 'shipped' AND pr_number IS NOT NULL").fetchall()
     nodes = _fetch(shipped, origin) if shipped else {}
-    counts = {'merged': 0, 'closed': 0, 'reverted': 0, 'pending': 0}
+    counts = {'merged': 0, 'closed': 0, 'reverted': 0, 'pending': 0, 'unresolved': 0}
     now = store.now()
     for row in shipped:
-        node = nodes[row['id']]
+        node = nodes.get(row['id'])
+        if node is None:
+            counts['unresolved'] += 1
+            continue
         state = node.get('state')
         if state == 'MERGED':
             oid = (node.get('mergeCommit') or {}).get('oid')

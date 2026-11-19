@@ -84,6 +84,20 @@ class SchemaTest(DataDirCase, unittest.TestCase):
         self.assertEqual(a.execute('SELECT COUNT(*) FROM rounds').fetchone()[0], 2)
 
 
+class ParallelFirstUseTest(DataDirCase, unittest.TestCase):
+    def test_parallel_first_connect(self):
+        import subprocess
+        import sys
+        from tests.helpers import KB
+        procs = [subprocess.Popen([sys.executable, '-I', KB, 'init'], cwd=self.repo, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True) for _ in range(6)]
+        results = [p.communicate() + (p.returncode,) for p in procs]
+        self.assertEqual([r[2] for r in results], [0] * 6, [r[1] for r in results])
+        conn = store.connect(self.repo)
+        self.assertEqual(conn.execute('SELECT version FROM schema_version').fetchall()[0][0], 1)
+        self.assertEqual(conn.execute('SELECT COUNT(*) FROM schema_version').fetchone()[0], 1)
+
+
 class CliTest(DataDirCase, unittest.TestCase):
     def test_init_prints_data_dir(self):
         r = run_kb('init', cwd=self.repo)

@@ -58,6 +58,12 @@ class StatsTest(DataDirCase, unittest.TestCase):
         self.assertIn('memory off', text)
         self.assertIn('memory on', text)
 
+    def test_empty_round_not_shown(self):
+        self.add([item('merged')])
+        findings.start_round(self.conn, 'main', 'x', 'on', {}, [])
+        rows = stats.round_stats(self.conn, 5)
+        self.assertEqual([r['candidates'] for r in rows], [1])
+
     def test_cli(self):
         self.add([item('merged')])
         r = run_kb('stats', '--rounds', '3', cwd=self.repo)

@@ -15,7 +15,8 @@ NOT_HUNTED = ('*.md', 'docs/*', 'doc/*', 'tests/*', 'test/*', '*/tests/*', '*/te
 
 
 def _tracked(repo_dir, base):
-    r = subprocess.run(['git', '-C', repo_dir, 'ls-tree', '-r', '--name-only', f'origin/{base}'],
+    r = subprocess.run(['git', '-c', 'core.quotePath=false', '-C', repo_dir, 'ls-tree', '-r', '--name-only',
+                        f'origin/{base}'],
                        capture_output=True, text=True)
     return set(r.stdout.splitlines())
 

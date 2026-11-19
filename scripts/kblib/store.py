@@ -6,6 +6,7 @@ import pathlib
 import re
 import sqlite3
 import subprocess
+import time
 
 SCHEMA_VERSION = 1
 
@@ -74,7 +75,7 @@ CREATE TABLE findings (
   created TEXT NOT NULL, updated TEXT NOT NULL
 );
 CREATE INDEX findings_hash ON findings(snippet_hash);
-CREATE INDEX findings_round ON findings(round_id, nn);
+CREATE UNIQUE INDEX findings_round_nn ON findings(round_id, nn) WHERE nn IS NOT NULL;
 CREATE VIRTUAL TABLE findings_fts USING fts5(root_cause, reason, snippet, path, content='findings', content_rowid='id');
 CREATE TRIGGER findings_ai AFTER INSERT ON findings BEGIN
   INSERT INTO findings_fts(rowid, root_cause, reason, snippet, path)
@@ -180,28 +181,55 @@ def _version(conn):
     return row[0] if row else 0
 
 
+def _statements(script):
+    """Split a migration into statements; a CREATE TRIGGER body keeps its inner semicolons."""
+    out, buf = [], ''
+    for line in script.splitlines(keepends=True):
+        buf += line
+        if sqlite3.complete_statement(buf):
+            out.append(buf.strip())
+            buf = ''
+    if buf.strip():
+        out.append(buf.strip())
+    return out
+
+
 def connect(repo_dir):
     path = data_dir(repo_dir) / 'kb.db'
     existed = path.exists() and path.stat().st_size > 0
     conn = sqlite3.connect(path, timeout=5.0)
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA busy_timeout = 5000')
-    if conn.execute('PRAGMA journal_mode').fetchone()[0] != 'wal':
-        conn.execute('PRAGMA journal_mode = WAL')
+    # switching to WAL ignores the busy timeout while another process holds the file; retry briefly
+    for attempt in range(50):
+        try:
+            if conn.execute('PRAGMA journal_mode').fetchone()[0] != 'wal':
+                conn.execute('PRAGMA journal_mode = WAL')
+            break
+        except sqlite3.OperationalError:
+            if attempt == 49:
+                raise
+            time.sleep(0.1)
     version = _version(conn)
     if version < SCHEMA_VERSION:
         if existed:
             bak = sqlite3.connect(path.with_name('kb.db.bak'))
             conn.backup(bak)
             bak.close()
-        for target in range(version + 1, SCHEMA_VERSION + 1):
-            conn.executescript('BEGIN;' + MIGRATIONS[target]
-                               + 'DELETE FROM schema_version;'
-                               + f'INSERT INTO schema_version VALUES ({target});'
-                               + 'COMMIT;')
-        conn.executemany("INSERT OR IGNORE INTO kinds (slug, status) VALUES (?, 'approved')",
-                         [(k,) for k in KINDS])
-        conn.commit()
+        conn.execute('BEGIN IMMEDIATE')
+        version = _version(conn)  # another session may have migrated while we waited for the lock
+        try:
+            for target in range(version + 1, SCHEMA_VERSION + 1):
+                for stmt in _statements(MIGRATIONS[target]):
+                    conn.execute(stmt)
+                conn.execute('DELETE FROM schema_version')
+                conn.execute('INSERT INTO schema_version VALUES (?)', (target,))
+            conn.executemany("INSERT OR IGNORE INTO kinds (slug, status) VALUES (?, 'approved')",
+                             [(k,) for k in KINDS])
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     elif version > SCHEMA_VERSION:
         raise KbError(f'{path} is schema {version}; this kb.py knows {SCHEMA_VERSION}. Update the skill.')
     return conn

@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
 import subprocess
 
 from kblib import store
@@ -39,17 +40,29 @@ def context_hash(repo_dir, path, snippet, lines):
     if not want:
         return None
     n = len(want)
-    for i in range(len(file_lines) - n + 1):
-        if file_lines[i:i + n] == want:
-            window = file_lines[max(0, i - lines):i + n + lines]
-            return hashlib.sha1('\n'.join(window).encode()).hexdigest()
-    # a one-line snippet may be part of a longer line
-    if n == 1:
-        for i, line in enumerate(file_lines):
-            if want[0] in line:
-                window = file_lines[max(0, i - lines):i + 1 + lines]
-                return hashlib.sha1('\n'.join(window).encode()).hexdigest()
-    return None
+    at = [i for i in range(len(file_lines) - n + 1) if file_lines[i:i + n] == want]
+    if not at and n == 1:
+        # a one-line snippet may be part of a longer line
+        at = [i for i, line in enumerate(file_lines) if want[0] in line]
+    if len(at) != 1:
+        # missing, or ambiguous: the same code in two places must never count as the same finding
+        return None
+    i = at[0]
+    window = file_lines[max(0, i - lines):i + n + lines]
+    return hashlib.sha1('\n'.join(window).encode()).hexdigest()
+
+
+def norm_path(repo_dir, path):
+    """Repository-relative, without a leading ./ (absolute paths inside the checkout are made relative)."""
+    p = (path or '').strip()
+    if os.path.isabs(p):
+        top = subprocess.run(['git', '-C', repo_dir, 'rev-parse', '--show-toplevel'], capture_output=True,
+                             text=True).stdout.strip() or repo_dir
+        rel = os.path.relpath(p, top)
+        p = rel if not rel.startswith('..') else p
+    while p.startswith('./'):
+        p = p[2:]
+    return os.path.normpath(p) if p else p
 
 
 def validate_outcome(outcome):
@@ -77,7 +90,15 @@ def start_round(conn, base, base_sha, memory, settings, areas):
     return cur.lastrowid
 
 
+ROUND = None  # kb.py --round: pin a round when another session may start one in the same repository
+
+
 def current_round(conn):
+    if ROUND is not None:
+        r = conn.execute('SELECT * FROM rounds WHERE id = ?', (ROUND,)).fetchone()
+        if r is None:
+            raise LookupError(f'no round {ROUND}')
+        return r
     return conn.execute('SELECT * FROM rounds ORDER BY id DESC LIMIT 1').fetchone()
 
 
@@ -98,9 +119,10 @@ def _kind(conn, kind):
     return kind
 
 
-def head_sha(repo_dir):
-    r = subprocess.run(['git', '-C', repo_dir, 'rev-parse', 'HEAD'], capture_output=True, text=True)
-    return r.stdout.strip() or None
+def head_sha(repo_dir, rev='HEAD'):
+    r = subprocess.run(['git', '-C', repo_dir, 'rev-parse', '--verify', '--quiet', rev + '^{commit}'],
+                       capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else None
 
 
 def add_findings(conn, repo_dir, round_id, items):
@@ -115,6 +137,9 @@ def add_findings(conn, repo_dir, round_id, items):
         _validate_fields(it)
     try:
         ids = _insert(conn, repo_dir, round_id, items, cfg)
+    except sqlite3.IntegrityError as e:
+        conn.rollback()
+        raise ValueError(f'an NN is already used in this round ({e})')
     except Exception:
         conn.rollback()
         raise
@@ -124,9 +149,13 @@ def add_findings(conn, repo_dir, round_id, items):
 
 def _insert(conn, repo_dir, round_id, items, cfg):
     head = None
+    if round_id is not None:
+        r = conn.execute('SELECT base_sha FROM rounds WHERE id = ?', (round_id,)).fetchone()
+        head = r['base_sha'] if r else None
     ids = []
     for it in items:
         row = {k: it.get(k) for k in REQUIRED + OPTIONAL}
+        row['path'] = it['path'] = norm_path(repo_dir, it['path'])
         row['kind'] = _kind(conn, it['kind'])
         row['in_batch'] = 1 if it.get('in_batch') is None else int(it['in_batch'])
         if row['outcome_phase'] is not None:

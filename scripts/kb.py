@@ -12,6 +12,7 @@ candidate; everything else is re-checked against the current code.
 import argparse
 import json
 import os
+import sqlite3
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -42,7 +43,7 @@ def cmd_init(args):
 def cmd_round_start(args):
     conn = store.connect(args.repo)
     areas = [a.strip() for a in args.areas.split(',') if a.strip()] if args.areas else []
-    sha = findings.head_sha(args.repo)
+    sha = findings.head_sha(args.repo, f'origin/{args.base}') or findings.head_sha(args.repo)
     rid = findings.start_round(conn, args.base, sha, args.memory, store.load_config(args.repo), areas)
     print(f'round {rid} (memory {args.memory})')
 
@@ -189,6 +190,8 @@ def cmd_patterns(args):
 
 def cmd_kinds(args):
     conn = store.connect(args.repo)
+    if args.action and not args.slug or args.action == 'map' and not args.existing:
+        raise ValueError('usage: kinds approve <slug> | kinds map <slug> <existing kind>')
     if args.action == 'approve':
         findings.approve_kind(conn, args.slug)
     elif args.action == 'map':
@@ -202,6 +205,8 @@ def cmd_kinds(args):
 def build_parser():
     p = argparse.ArgumentParser(prog='kb.py', description=__doc__.split('\n')[0])
     p.add_argument('-C', dest='repo', default='.', help='repository (any worktree of it); default: .')
+    p.add_argument('--round', type=int, help='use this round instead of the latest (when another session may '
+                                             'start a round in the same repository)')
     sub = p.add_subparsers(dest='command', required=True)
 
     s = sub.add_parser('init', help='create or migrate the database; print its folder')
@@ -315,9 +320,10 @@ def build_parser():
 def main(argv=None):
     args = build_parser().parse_args(argv)
     args.repo = os.path.abspath(args.repo)
+    findings.ROUND = args.round
     try:
         return args.func(args) or 0
-    except (store.KbError, LookupError, ValueError) as e:
+    except (store.KbError, LookupError, ValueError, sqlite3.Error) as e:
         msg = e.args[0] if isinstance(e, LookupError) and e.args else e
         print(f'kb.py {args.command}: {msg}', file=sys.stderr)
         return 1

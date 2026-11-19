@@ -72,6 +72,33 @@ class LoadTest(SeedCase, unittest.TestCase):
         seed.load(self.conn, self.repo, self.scratch)
         self.assertEqual(self.conn.execute('SELECT outcome FROM findings').fetchone()[0], 'reverted')
 
+    def test_load_twice_adds_once(self):
+        seed.prepare(self.conn, self.repo, 'main', self.scratch, None)
+        self.answer([{'commit': self.small, 'kind': 'visible-typo', 'root_cause': 'r', 'path': 'src/a.js',
+                      'snippet': 'two'}])
+        self.assertEqual(seed.load(self.conn, self.repo, self.scratch), 1)
+        self.assertEqual(seed.load(self.conn, self.repo, self.scratch), 0)
+        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM findings').fetchone()[0], 1)
+
+    def test_load_names_missing_key(self):
+        seed.prepare(self.conn, self.repo, 'main', self.scratch, None)
+        self.answer([{'commit': self.small, 'kind': 'visible-typo'}])
+        with self.assertRaises(store.KbError) as e:
+            seed.load(self.conn, self.repo, self.scratch)
+        self.assertIn("'root_cause'", str(e.exception))
+
+    def test_missing_base_says_fetch(self):
+        with self.assertRaises(store.KbError) as e:
+            seed.prepare(self.conn, self.repo, 'nope', self.scratch, None)
+        self.assertIn('origin/nope not found', str(e.exception))
+
+    def test_non_ascii_path(self):
+        commit(self.repo, 'src/página.js', 'a\nb\n', 'fix: accent')
+        publish(self.repo)
+        seed.prepare(self.conn, self.repo, 'main', self.scratch, None)
+        entries = json.load(open(self.batches()[0]))
+        self.assertIn('+++ b/src/página.js', entries[0]['diff'])
+
     def test_load_rejects_unknown_commit(self):
         seed.prepare(self.conn, self.repo, 'main', self.scratch, None)
         self.answer([{'commit': 'f' * 40, 'skip': True}])

@@ -17,7 +17,7 @@ def _fts_query(text):
 
 
 def _one(conn, repo_dir, item, cfg):
-    path, snippet = item.get('path'), item.get('snippet')
+    path, snippet = findings.norm_path(repo_dir, item.get('path')), item.get('snippet')
     if not path or not snippet:
         raise ValueError('every candidate needs path and snippet')
     sh = findings.snippet_hash(snippet)
@@ -56,7 +56,7 @@ def check_candidates(conn, repo_dir, items, memory_on):
         if not memory_on:
             out.append(_miss())
             continue
-        key = (item.get('path'), findings.snippet_hash(item.get('snippet') or ''))
+        key = (findings.norm_path(repo_dir, item.get('path')), findings.snippet_hash(item.get('snippet') or ''))
         if key in seen:
             out.append({'gate': 'weak', 'match': None, 'note': f'same as candidate {seen[key]} in this batch'})
             continue

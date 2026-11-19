@@ -71,7 +71,12 @@ if key not in data:
     sys.stderr.write("fake gh: no response for " + key + "\\n")
     sys.exit(1)
 out = data[key]
+code = 0
+if isinstance(out, dict) and "__exit" in out:
+    code, out = out["__exit"], out["__stdout"]
+    sys.stderr.write("gh: GraphQL error\\n")
 sys.stdout.write(out if isinstance(out, str) else json.dumps(out))
+sys.exit(code)
 '''
 
 

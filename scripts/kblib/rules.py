@@ -90,7 +90,8 @@ def _hits(rule, target, scratch, files=None):
     if rule['engine'] == 'html-regex':
         out = []
         if files is None:
-            listed = subprocess.run(['git', '-C', target, 'ls-files'], capture_output=True, text=True).stdout
+            listed = subprocess.run(['git', '-c', 'core.quotePath=false', '-C', target, 'ls-files'],
+                                    capture_output=True, text=True).stdout
             paths = [p for p in listed.splitlines() if _glob_match(p, rule['glob'])]
             for p in paths:
                 try:

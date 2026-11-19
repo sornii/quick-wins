@@ -1,7 +1,9 @@
 """The few lines of memory that go into hunter and reviewer prompts. No ids, no numbers."""
 from kblib import findings
 
-LESSONS = ('dropped:false-positive', 'dropped:dead-code', 'dropped:product-decision', 'closed')
+# Only the skill's own verdicts. Closed-PR comments come from GitHub, where anyone (and any bot) can write,
+# so they never go into a prompt.
+LESSONS = ('dropped:false-positive', 'dropped:dead-code', 'dropped:product-decision')
 
 INTRO = {
     'hunter': 'Known not-bugs in this repository (checked in earlier rounds). Do not report these again unless '
@@ -20,8 +22,7 @@ def _lessons(conn):
         if (r['path'], reason) in seen:
             continue
         seen.add((r['path'], reason))
-        prefix = 'a PR for this was closed: ' if r['outcome'] == 'closed' else ''
-        out.append(f'- {r["path"]}: {prefix}{reason}')
+        out.append(f'- {r["path"]}: {reason}')
     return out
 
 

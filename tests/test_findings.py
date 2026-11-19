@@ -54,7 +54,9 @@ class AddTest(FindingsCase, unittest.TestCase):
         row = self.conn.execute('SELECT * FROM findings WHERE id = ?', (fid,)).fetchone()
         self.assertEqual(row['snippet_hash'], findings.snippet_hash('const x = load();'))
         self.assertIsNotNone(row['context_hash'])
-        self.assertEqual(row['base_sha'], git(self.repo, 'rev-parse', 'HEAD'))
+        seed = findings.add_findings(self.conn, self.repo, None, [item(outcome='seed', source='seed')])
+        head = self.conn.execute('SELECT base_sha FROM findings WHERE id = ?', (seed[0],)).fetchone()[0]
+        self.assertEqual(head, git(self.repo, 'rev-parse', 'HEAD'))
 
     def test_resolve_nn_and_id(self):
         a, b = findings.add_findings(self.conn, self.repo, self.round, [item(nn='01'), item(nn='02')])
@@ -64,6 +66,16 @@ class AddTest(FindingsCase, unittest.TestCase):
             findings.resolve(self.conn, '09')
         with self.assertRaises(LookupError):
             findings.resolve(self.conn, '#99')
+
+    def test_duplicate_nn_refused(self):
+        findings.add_findings(self.conn, self.repo, self.round, [item(nn='01')])
+        with self.assertRaises(ValueError):
+            findings.add_findings(self.conn, self.repo, self.round, [item(nn='01')])
+        self.assertEqual(self.conn.execute('SELECT COUNT(*) FROM findings').fetchone()[0], 1)
+
+    def test_base_sha_is_the_rounds(self):
+        [fid] = findings.add_findings(self.conn, self.repo, self.round, [item()])
+        self.assertEqual(self.conn.execute('SELECT base_sha FROM findings WHERE id = ?', (fid,)).fetchone()[0], 'abc')
 
     def test_update_fix_diff_from_worktree(self):
         findings.add_findings(self.conn, self.repo, self.round, [item(nn='01')])
@@ -128,6 +140,18 @@ class CliTest(FindingsCase, unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         r = run_kb('patterns', 'missing-await', cwd=self.repo)
         self.assertEqual(r.returncode, 0, r.stderr)
+        r = run_kb('kinds', 'approve', cwd=self.repo)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('usage', r.stderr)
+
+    def test_round_option_pins_a_round(self):
+        findings.add_findings(self.conn, self.repo, self.round, [item(nn='01', slug='mine')])
+        run_kb('round', 'start', '--base', 'main', cwd=self.repo)  # another session's round
+        r = run_kb('show', '01', cwd=self.repo)
+        self.assertEqual(r.returncode, 1)
+        r = run_kb('--round', str(self.round), 'show', '01', cwd=self.repo)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('mine', r.stdout)
 
 
 if __name__ == '__main__':

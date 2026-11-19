@@ -102,6 +102,22 @@ class GateTest(CheckCase, unittest.TestCase):
         self.new_round()
         self.assertIn(self.check()['gate'], ('weak', 'miss'))
 
+    def test_same_line_twice_in_file_never_strong(self):
+        lines = list(LINES) + [f'const tail{i} = {i};' for i in range(40)] + ['if (user.roles) { allow(); }']
+        commit(self.repo, 'src/auth.js', '\n'.join(lines) + '\n', 'Add a second copy')
+        self.record('dropped:false-positive', reason='guarded in a()')
+        self.new_round()
+        self.assertNotEqual(self.check()['gate'], 'strong')
+
+    def test_paths_are_normalised(self):
+        fid = self.record('dropped:false-positive', path='./src/auth.js', reason='x')
+        self.assertEqual(self.conn.execute('SELECT path FROM findings WHERE id = ?', (fid,)).fetchone()[0],
+                         'src/auth.js')
+        self.new_round()
+        import os
+        self.assertEqual(self.check(path=os.path.join(self.repo, 'src/auth.js'))['gate'], 'strong')
+        self.assertEqual(self.check(path='./src/auth.js')['gate'], 'strong')
+
     def test_duplicate_within_batch(self):
         self.new_round()
         res = check.check_candidates(self.conn, self.repo, [dict(CAND), dict(CAND)], True)

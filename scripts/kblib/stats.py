@@ -11,7 +11,9 @@ def _dropped_at(rows, phase):
 
 def round_stats(conn, rounds):
     out = []
-    for rd in conn.execute('SELECT * FROM rounds ORDER BY id DESC LIMIT ?', (rounds,)).fetchall()[::-1]:
+    # rounds with no findings yet (the one phase 0 just opened) say nothing
+    for rd in conn.execute('SELECT * FROM rounds r WHERE EXISTS (SELECT 1 FROM findings f WHERE f.round_id = r.id) '
+                           'ORDER BY id DESC LIMIT ?', (rounds,)).fetchall()[::-1]:
         rows = conn.execute('SELECT * FROM findings WHERE round_id = ?', (rd['id'],)).fetchall()
         n = len(rows)
         unverified = sum(1 for r in rows if r['outcome'] == 'candidate')

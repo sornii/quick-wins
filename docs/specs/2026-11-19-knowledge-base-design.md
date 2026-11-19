@@ -153,7 +153,7 @@ transcripts. `kb.py supersede <id> [--by <id>]` retires a lesson that stopped be
 
 ### Rules (stage 3)
 - A rule is `rules/<id>.yml` (ast-grep, run with `npx --yes @ast-grep/cli`, installed in `$SCRATCH` per run)
-  or `rules/<id>.html.json` (a regex template check run by `kb.py` itself, for Blaze and other templates
+  or `rules/<id>.html.json` (a regex template check run by `kb.py` itself, for HTML-like templates
   ast-grep can't parse). Each carries `kind`, `pattern`, source finding ids, one must-match and one
   must-not-match example.
 - Created when a `pattern` has 2+ merged findings, or 3+ seeds. The orchestrator drafts it after phase 4;
@@ -177,14 +177,14 @@ shrinks.
 `kb.py promotions` lists, at the phase 5 stop, in its own section:
 | Step | Threshold (config) | Draft |
 |---|---|---|
-| Repo rule | rule with 5+ hits, 80%+ merged, no false positive in the last 3 rounds | PR adding it to the repo's own checks: an ESLint built-in rule where one fits, the repo's template linter (here `scripts/lint-blaze-html.js`), otherwise an ast-grep rule + CI step |
+| Repo rule | rule with 5+ hits, 80%+ merged, no false positive in the last 3 rounds | PR adding it to the repo's own checks: an ESLint built-in rule where one fits, the repo's own template linter where it has one, otherwise an ast-grep rule + CI step |
 | Repo docs | a non-mechanical lesson behind 3+ dropped findings | PR editing the repo's conventions doc or `AGENTS.md` |
 | Skill update | a process lesson, e.g. an area or source at 80%+ noise over 2 rounds | diff to this skill's SKILL.md |
 
 Nothing is published without approval. Approved repo promotions go through the normal pipeline (own
 worktree, the repository's conventions, one PR each). A rule added to CI must pass on today's code: the PR
 fixes every remaining match, or adds the rule as a warning. Rule fixtures count as tests where a repository
-restricts tests (this one: "only when asked"), so they need explicit approval. Skill updates become a local
+restricts tests (e.g. "only when asked"), so they need explicit approval. Skill updates become a local
 commit in the skill's repository.
 
 ### Stats and the memory-off switch

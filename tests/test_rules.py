@@ -66,6 +66,12 @@ class RuleTest(RulesCase, unittest.TestCase):
         self.assertEqual([h['path'] for h in hits], ['imports/ui/users.html'])
         self.assertIn('for="basic-url"', hits[0]['snippet'])
 
+    def test_non_ascii_path(self):
+        commit(self.repo, 'imports/ui/my dir/página.html', OTHER, 'Add página')
+        rules.add_rule(self.conn, self.repo, self.write(rule(sources=self.sources)), self.scratch)
+        paths = [h['path'] for h in rules.run_rules(self.conn, self.repo, self.repo, self.scratch)]
+        self.assertIn('imports/ui/my dir/página.html', paths)
+
     def test_rule_refused_when_examples_fail(self):
         bad = rule(must_not_match='<label for="a">A</label>', sources=self.sources)
         with self.assertRaises(store.KbError) as e:
