@@ -68,7 +68,8 @@ CREATE TABLE findings (
   fix_diff TEXT, source TEXT,
   outcome TEXT NOT NULL, outcome_phase TEXT, reason TEXT,
   browser_check TEXT, introduced_in TEXT,
-  pr_number INTEGER, pr_url TEXT, changed_in_review INTEGER NOT NULL DEFAULT 0,
+  pr_number INTEGER, pr_url TEXT, pr_title TEXT, merge_commit TEXT,
+  changed_in_review INTEGER NOT NULL DEFAULT 0,
   superseded_by INTEGER, seed_commit TEXT,
   created TEXT NOT NULL, updated TEXT NOT NULL
 );

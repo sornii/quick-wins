@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from kblib import check, findings, ingest, store  # noqa: E402
+from kblib import check, findings, ingest, store, sync  # noqa: E402
 
 
 def read_json(path):
@@ -85,6 +85,10 @@ def cmd_import_checks(args):
 
 def cmd_import_ship(args):
     print(ingest.import_ship(store.connect(args.repo), args.spec))
+
+
+def cmd_sync(args):
+    print(json.dumps(sync.sync(store.connect(args.repo), args.repo, args.base)))
 
 
 def cmd_list(args):
@@ -160,6 +164,10 @@ def build_parser():
     s = sub.add_parser('import-ship', help='record the PRs ship.py opened (ship.json); prints the count')
     s.add_argument('spec')
     s.set_defaults(func=cmd_import_ship)
+
+    s = sub.add_parser('sync', help="read every open PR's fate from GitHub (phase 0); prints counts")
+    s.add_argument('--base', required=True, help='the PR base branch, to look for reverts on origin/<base>')
+    s.set_defaults(func=cmd_sync)
 
     s = sub.add_parser('list', help="this round's findings, grouped by kind")
     s.add_argument('--runners-up', action='store_true')

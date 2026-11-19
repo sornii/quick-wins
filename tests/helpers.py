@@ -47,7 +47,7 @@ def commit(repo, path, text, subject, body=None):
             f.write(text)
         git(repo, 'add', path)
     msg = subject if body is None else subject + '\n\n' + body
-    git(repo, 'commit', '-q', '-m', msg)
+    git(repo, 'commit', '-q', '--allow-empty', '-m', msg)
     return git(repo, 'rev-parse', 'HEAD')
 
 
