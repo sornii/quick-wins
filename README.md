@@ -20,12 +20,16 @@ Yours, in the repository you run it on. There is nothing to configure. Before it
 
 ## Needs
 
-- two places it may write without asking, if your agent asks for permission per path: `/tmp/quick-wins/` (scratch files) and `<repo>-worktrees/` beside the repository (one worktree per fix)
+- three places it may write without asking, if your agent asks for permission per path: `/tmp/quick-wins/` (scratch files), `<repo>-worktrees/` beside the repository (one worktree per fix), and `~/.local/share/quick-wins/` (the findings database, one folder per repository, kept between runs)
 
 - `git` and `gh`, signed in to the repository being swept
 - `python3` with Pillow, for `scripts/annotate.py`
 - Node.js, for the Playwright checks in phase 3.5 (Playwright itself is installed per run, in the scratch directory)
 
+## What it remembers
+
+Every finding and what became of it (merged, closed, reverted, or dropped and why), in one SQLite file per repository under `~/.local/share/quick-wins/<host_owner_name>/`, read and written by `scripts/kb.py`. It is seeded from the repository's own small fix commits on the first run. It stores code snippets, diffs, commit hashes and PR numbers, never who wrote what. Settings are in `config.json` next to it; delete the folder to start a repository over.
+
 ## Changing it
 
-Edit the files in place and commit. `SKILL.md` text is picked up by a running session; scripts are read each time they run.
+Run the tests with `python3 -I -m unittest discover -s tests -t .` (standard library only; they use throwaway git repositories and a fake `gh`). Edit the files in place and commit. `SKILL.md` text is picked up by a running session; scripts are read each time they run.

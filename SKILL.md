@@ -1,6 +1,6 @@
 ---
 name: quick-wins
-description: Orchestrate parallel agents to hunt down a batch of small, low-risk "one-liner" bugs in a codebase, fix each one in its own git worktree and branch, cross-check the fixes for false positives with independently-biased reviewers, prove the user-visible ones in a real browser against a running app, find the commit that introduced each bug, and then (after one confirmation) open a GitHub issue + PR per fix following the repo's conventions, put them on the project board, and babysit CI. Use this whenever the user asks for "quick wins", "low-hanging fruit", "small bugs", "one-liners", a "BUGS.md", a bug sweep/bug bash, or to "find N small fixes and open PRs", even if they don't say "skill" or describe every step.
+description: Orchestrate parallel agents to hunt down a batch of small, low-risk "one-liner" bugs in a codebase, fix each one in its own git worktree and branch, cross-check the fixes for false positives with independently-biased reviewers, prove the user-visible ones in a real browser against a running app, find the commit that introduced each bug, and then (after one confirmation) open a GitHub issue + PR per fix following the repo's conventions, put them on the project board, and babysit CI. Use this whenever the user asks for "quick wins", "low-hanging fruit", "small bugs", "one-liners", a bug sweep/bug bash, or to "find N small fixes and open PRs", even if they don't say "skill" or describe every step.
 ---
 
 # Quick wins: find, fix, verify, ship
@@ -9,13 +9,23 @@ This is a pipeline the user runs repeatedly: find ~N tiny bugs, fix each in isol
 
 Run autonomously through phases 1–4. **Stop once before phase 5** (anything that publishes to GitHub) and wait for the user's go-ahead, because issues, PRs, pushes and review requests notify people and can't be quietly undone.
 
-Keep every scratch file (BUGS.md, PR descriptions, the ship spec, the preview worktree, temp dumps) under `/tmp/quick-wins/<repo-name>/` (called `$SCRATCH` below), and fix worktrees under `<repo>-worktrees/`. Use the per-repo subdirectory, not bare `/tmp/quick-wins/` or `/tmp`: the user runs quick-wins in several repos at once, and a shared directory mixes their `PR-NN-*.md` files. Keep to these two places: a person can pre-approve them once in their agent's permissions, and anything else outside the repo means a prompt for every file.
+Keep every scratch file (PR descriptions, the ship spec, the preview worktree, temp dumps) under `/tmp/quick-wins/<repo-name>/` (called `$SCRATCH` below), and fix worktrees under `<repo>-worktrees/`. Use the per-repo subdirectory, not bare `/tmp/quick-wins/` or `/tmp`: the user runs quick-wins in several repos at once, and a shared directory mixes their `PR-NN-*.md` files. The findings database lives in a third place, `~/.local/share/quick-wins/<repo-key>/` (see Memory). Keep to these three places: a person can pre-approve them once in their agent's permissions, and anything else outside the repo means a prompt for every file.
 
 Keep a todo list with one item per phase, and update the user with one short line between phases. In phase 3.5, add one item per fix being checked and close it only when its before shot, its after shot, both annotations and the table in its PR text all exist: a picture that was never taken then shows in the list, not at review time.
 
+## Memory: the findings database
+
+Every finding of every round, and what became of it, is kept in one SQLite file per repository: `~/.local/share/quick-wins/<repo-key>/kb.db` (`<repo-key>` comes from `origin`, so every worktree of a repository shares it). It is the only list of findings. Read and write it only through `python3 -I scripts/kb.py -C <checkout> <command>` (`kb.py <command> --help` for each); never with SQL. Each round's findings are numbered `NN` (two digits), which also names `PR-NN-<slug>.md`, the evidence files, `checks.tsv` and `ship.json`.
+
+- **Memory is evidence, never a verdict.** Only a `strong` match from `kb.py check` (same file, same snippet, same surrounding code, already shipped or already dropped) skips a candidate. Everything else is verified against the current code as if it were new.
+- **Nothing from it goes into anything published**: no database ids, no stats, no "found before" in commits, PRs or issues.
+- **Never store** who wrote a commit or a bug, customer data, or anything seen in a running app. Code, diffs, commit hashes and PR numbers are fine.
+- **A memory-off round** (`kb.py round start --memory off`) still records everything but uses none of it. Offer one now and then, so the person can compare: it is the honest test of whether memory helps.
+- Settings live in `config.json` beside the database; the defaults are in `scripts/kblib/store.py`.
+
 ## Whose conventions apply
 
-None of this skill's own. How a commit subject reads, how a branch is named, what a PR title and body look like, which labels and reviewers a PR gets, whether a fix gets an issue: each of these is learned in phase 0, from the repository being swept and from what the person running the sweep already does there. Nothing is configured, in this skill or beside it, and nothing is carried over from another repository or an earlier run. When sources disagree, the order is:
+None of this skill's own. How a commit subject reads, how a branch is named, what a PR title and body look like, which labels and reviewers a PR gets, whether a fix gets an issue: each of these is learned in phase 0, from the repository being swept and from what the person running the sweep already does there. Nothing is configured, in this skill or beside it, and nothing is carried over from another repository or an earlier run. (The findings database remembers findings, not conventions: these are learned again every round.) When sources disagree, the order is:
 
 1. what the person says in this conversation;
 2. what they do in this repository: their own recent commits and pull requests (subjects, titles, branches, body sections and length, labels, who they ask for review, whether an issue is linked);
@@ -59,6 +69,13 @@ Run `scripts/conventions.sh <repo> > $SCRATCH/conventions.raw.txt`. It lists the
 
 A rule with no evidence stays empty; don't fill it from habit or from this file's examples. Every subagent that writes a commit or a PR text gets the relevant lines of `conventions.md` in its prompt, with two or three real examples copied from the repository. If an earlier round's issue exists, read its project board column (the `project_status.sh` read-back query) and use it as the default status in phase 5 instead of asking.
 
+Then open the round in the findings database, from the main checkout:
+
+1. `kb.py round start --base <base> --areas <a,b,...>`, with the 4–5 hunting areas you will use in phase 1 (add `--memory off` only when the person asks for, or accepts, a memory-off round).
+2. `kb.py sync --base <base>` reads from GitHub what happened to every PR an earlier round opened: merged, closed (with the review comments as the reason), still open, or reverted since. If it prints `sync skipped: ...` (no `gh`, signed out, offline), say so in the phase update and go on; nothing was changed.
+3. `kb.py seed status --scratch $SCRATCH`. While it says "room for more", seed the database from the repository's own small fix commits: `kb.py seed prepare --base <base> --scratch $SCRATCH` (pass `--fix-regex` matching the fix subjects you found in `conventions.md` when they don't use the words fix/bug/typo/hotfix), then one fast-model subagent per `$SCRATCH/seed/batch-NNN.json`, each told to follow `$SCRATCH/seed/README.txt` and write `answer-NNN.json`, then `kb.py seed load --scratch $SCRATCH`. Seeds count for less than the skill's own results, and never skip a candidate.
+4. Put the last line of `kb.py stats` in the phase 0 update.
+
 Check `<repo>-worktrees/` for an earlier round's worktrees. Those already shipped have their branch on `origin`. If each is clean and its HEAD equals `origin/<branch>`, offer to remove them (`git worktree remove` + `git branch -D`); otherwise they clutter the review loop and the blame step.
 
 ## Phase 0.5: Build a preview of pending work
@@ -77,16 +94,27 @@ Two traps to tell them about:
 - A missing `await` on a path that writes data or calls an external service (Stripe, email, SMS) can re-enable a flow that has silently been broken for months. Before listing it, check the method's auth check and what side effects the fixed path now has. If it's unauthenticated or does irreversible work, it's a security or product issue, not a candidate for this batch.
 - Verify that the **fix** works against the installed library, not just that the bug is real. Example: URL-encoding a query param doesn't help if the router decodes it twice.
 
+Collect every hunter's candidates into one JSON list (`$SCRATCH/candidates.json`: `kind`, `root_cause`, `path`, `snippet` as it is in the file, `source`, plus `symbol` and `area` when known) and run `kb.py -C <the checkout they hunted> check $SCRATCH/candidates.json`. `kind` is one of `kb.py kinds`, or `new:<slug>` for a bug of none of them (`kb.py patterns <kind>` lists the root-cause slugs already used; reuse one for `pattern` when it fits). `source` is `hunter:explore` for now. Per candidate it answers:
+- `strong`: already shipped in an open PR, or already dropped for a reason that still holds (same file, same snippet, same surrounding code). Skip it; record it as `dropped:duplicate` at phase 1 with the note as the reason, and list these in the phase update as "skipped as known".
+- `weak`: something related is known (`reintroduced`, `sibling of`, `seen before`, `related`). Verify it as new, with the earlier record (`kb.py show '#<id>'`) next to it. A `reintroduced` bug came back after a merged fix: worth a line in its PR's background. A `sibling` is usually a real separate copy of a bug.
+- `miss`: nothing known.
+
 Then **verify every candidate yourself** by reading the code (one batched `sed -n` command over all locations is fast). Drop anything you can't confirm, and anything in code nothing reaches: for a template, grep that `{{> name}}` or a route renders it; for a method, that something calls it. Catching dead code here is cheaper than in phase 3, after a fix was written. With a preview, also check that each snippet exists on the **base** (`git grep -nF '<snippet>' origin/<base> -- <path>`), and record the base's line numbers, since they differ from the preview's:
 - missing on the base means the bug lives in an open PR's code. Don't fix it; list it under "Review notes for open PRs" with the PR number (`git -C $SCRATCH/preview log --merges --format=%s -- <path>` lists the `preview: #N` merges that touched the file). Offer these to the user as review comments; never publish them on their own.
-- present on the base but in a file a skipped (conflicting) PR touches: still valid, but check that PR's diff (`gh pr diff <n>`) so you don't duplicate its fix. Write the survivors to `BUGS.md` **outside the repo** (`$SCRATCH/BUGS.md`), grouped by kind. Keep runners-up in a separate section, not counted. Tag each survivor with `verify: ui`, `http` or `none` for phase 3.5: `ui` when a user can see the bug on a page, `http` for an endpoint or webhook whose response changes, `none` for logging, cron-only code and pure text typos.
+- present on the base but in a file a skipped (conflicting) PR touches: still valid, but check that PR's diff (`gh pr diff <n>`) so you don't duplicate its fix.
+
+Record **every** candidate with `kb.py -C <the checkout they hunted> add <file.json>` (same fields as for `check`, plus `outcome`), dropped ones included, because the drops and their reasons are what the next round learns from:
+- the ones you drop: `outcome` `dropped:<why>` (`false-positive`, `dead-code`, `duplicate`, `product-decision`, `in-open-pr`, `unsafe`), `outcome_phase` `1`, and a one-line `reason` anchored in the code ("`roles` is always an array: `getRoles()` defaults it"). Write the reason as a lesson the next hunter can use, never as a transcript.
+- the survivors: `outcome` `confirmed`, with this round's `nn` (`01`, `02`, ...), a short `slug`, and `verify` for phase 3.5: `ui` when a user can see the bug on a page, `http` for an endpoint or webhook whose response changes, `none` for logging, cron-only code and pure text typos. Runners-up get `in_batch` `0`: kept, not counted, not fixed.
+
+Show `kb.py list --runners-up` in the phase update; it groups the round by kind.
 
 ## Phase 2: Fix (one worktree and one agent per bug)
 
 Create all worktrees up front with `scripts/make_worktrees.sh` (see the header for usage), in a sibling directory named `<repo>-worktrees` (e.g. `~/code/app-worktrees`). Each one gets a branch off the fetched base, and a symlink to the main checkout's `node_modules` so pre-commit hooks work. The branch name is provisional (`fix/<slug>`); phase 5 renames it to the repository's own format.
 
 Spawn one general agent per bug, in batches of ~10 in the same turn. Each prompt must be self-contained:
-- the `BUGS.md` item number, the worktree path and the branch
+- the output of `kb.py show NN` for its bug, the worktree path and the branch
 - "re-read and confirm first; if it isn't real or the fix is unsafe, don't commit and explain why"
 - minimal diff, no refactors, no tests unless the repo or user asks
 - commit in the format recorded in `conventions.md` (paste those lines and two real subjects from the repository), **hooks on, no `--no-verify`**. If a linter rejects the suggested form (e.g. `consistent-return`, `arrow-body-style`), adapt the code, don't bypass the hook. If the formatter touches unrelated lines, restore them and amend.
@@ -97,7 +125,7 @@ Spawn one general agent per bug, in batches of ~10 in the same turn. Each prompt
 
 If the user interrupts mid-batch, agents may have half-finished. Resume them with their session IDs rather than starting fresh, and check each worktree's `git status` before assuming anything.
 
-Afterwards, verify with one loop over the worktrees: commit count vs. base (expect 1), clean status, last commit subject. Normalize PR titles so they match the commit subjects.
+Afterwards, verify with one loop over the worktrees: commit count vs. base (expect 1), clean status, last commit subject. Normalize PR titles so they match the commit subjects. Record each result yourself (the agents don't): `kb.py update NN --outcome fixed --phase 2 --fix-diff-from <worktree>`, or for an agent that found the bug isn't real or the fix unsafe, `kb.py update NN --outcome dropped:<why> --phase 2 --reason '<its reason, one line>'`.
 
 ## Phase 3: Hunt for false positives (three biased reviewers)
 
@@ -112,11 +140,11 @@ Verify the points of disagreement yourself; don't just count votes. Then present
 - **extend** incomplete fixes (amend; hooks on)
 - **reword** overstated PR descriptions (e.g. "no visible change today; latent bug"), and, where the repository types its commits and branches, retype a fix that is really a cleanup (`fix` to `chore`, say).
 
-The user said to stop only before GitHub, so apply these recommendations and tell them what you dropped and why. If a drop is a judgment call, list it clearly so they can veto it.
+The user said to stop only before GitHub, so apply these recommendations and tell them what you dropped and why. If a drop is a judgment call, list it clearly so they can veto it. Record each drop: `kb.py update NN --outcome dropped:<why> --phase 3 --reason '<the lesson, one line, anchored in the code>'`; and after an amend, `kb.py update NN --fix-diff-from <worktree>` again.
 
 ## Phase 3.5: Prove the visible fixes in a running app
 
-Code reading can agree with itself and still be wrong about what a user sees. For the fixes tagged `ui` or `http` that survived phase 3 (or the ones the user named), reproduce the bug on the base build and watch it disappear with the fix. Skip `none`. Skip the whole phase, and say so, when the repo can't be run locally against a database that is safe to write to.
+Code reading can agree with itself and still be wrong about what a user sees. For the fixes tagged `ui` or `http` that survived phase 3 (`kb.py list --verify ui,http`, or the ones the user named), reproduce the bug on the base build and watch it disappear with the fix. Skip `none`. Skip the whole phase, and say so, when the repo can't be run locally against a database that is safe to write to.
 
 **Read `references/browser-verification.md` before starting anything.** The three rules that matter most:
 
@@ -129,7 +157,7 @@ Outcomes: bug seen on the base and gone with the fix means verified, and the PR 
 **The pictures are the proof, so the word "verified" depends on them.** A reviewer can't tell "I saw it" from "I think I saw it" without the pair, and the scratch directory is deleted at the end. So:
 
 - Write one line per fix that survived phase 3 to `$SCRATCH/evidence/checks.tsv`: `NN slug tag outcome reason`, where the outcome is `verified`, `not-verified <reason>`, or `skipped` for a `none` fix. Fixes that were never run in the app get a line too (`not-verified not run: no safe database`).
-- End the phase with `python3 -I scripts/check_evidence.py $SCRATCH` and don't leave it until it passes. It fails when a `verified` fix lacks either annotated picture (or the before/after response text for `http`), when its PR text doesn't show them in a Before/After table, and when the PR text of any other fix claims a browser check.
+- End the phase with `python3 -I scripts/check_evidence.py $SCRATCH` and don't leave it until it passes. Then `kb.py import-checks $SCRATCH/evidence/checks.tsv`, and record any fix dropped here as `dropped:<why>` at phase `3.5`. It fails when a `verified` fix lacks either annotated picture (or the before/after response text for `http`), when its PR text doesn't show them in a Before/After table, and when the PR text of any other fix claims a browser check.
 - When a capture fails, fix the cause and take it again. If you can't, the fix is `not-verified` and its PR says "not checked in a browser", whatever you saw on the way. Never keep "verified" on the strength of text you read from the page.
 - Look at every picture before it leaves the machine (open the file). It gets uploaded to GitHub, and nothing can grep an image: it must not show the scratch path, a home directory, this skill's name, or a real person's data. Capture only the region that matters (`locator.screenshot()` or a `clip`), which also keeps paths in other parts of the page out of the frame.
 
@@ -147,9 +175,11 @@ Add it to each PR description where the repository's template has room for backg
 - one commit: `- <hash>: <~6-word reason>`
 - several commits: a `| Commit | Why |` table
 
+Record the commit you settled on: `kb.py update NN --introduced-in <hash>`.
+
 ## Phase 5: Publish (ask first)
 
-Run `python3 -I scripts/check_evidence.py $SCRATCH` once more and fix what it reports before showing anything: PR texts get edited between phase 3.5 and here, and this is the last moment a missing picture costs nothing. Then stop and show the user the list of what will be created (N PRs, plus N issues if this repository pairs them; items reused from existing issues, labels, reviewers, base, board column, draft or not). Say where each convention came from, reading it off `$SCRATCH/conventions.md` ("no reviewers: none of your PRs here ask anyone"), so a wrong inference gets corrected before anything is published. For each fix say how it was checked (verified in a browser, or code review and hooks only); before/after screenshots go into the PR body: name the evidence files in the description's Before/After table, and `ship.py` uploads them when it opens the PR (for a PR that already exists, `gh pr edit --attach`; see `references/browser-verification.md`). Give them a command to review every diff with its PR text, run from `<repo>-worktrees/` (`delta` gives GitHub-like syntax highlighting; without it, `git log --color=always ... | less -R`):
+Run `python3 -I scripts/check_evidence.py $SCRATCH` once more and fix what it reports before showing anything: PR texts get edited between phase 3.5 and here, and this is the last moment a missing picture costs nothing. Then stop and show the user the list of what will be created (N PRs, plus N issues if this repository pairs them; items reused from existing issues, labels, reviewers, base, board column, draft or not). Say where each convention came from, reading it off `$SCRATCH/conventions.md` ("no reviewers: none of your PRs here ask anyone"), so a wrong inference gets corrected before anything is published. For each fix say how it was checked (verified in a browser, or code review and hooks only); before/after screenshots go into the PR body: name the evidence files in the description's Before/After table, and `ship.py` uploads them when it opens the PR (for a PR that already exists, `gh pr edit --attach`; see `references/browser-verification.md`). If `kb.py kinds --pending` lists new bug kinds from this round, ask for each whether it joins the list (`kb.py kinds approve <slug>`) or belongs to an existing kind (`kb.py kinds map <slug> <existing>`). Give them a command to review every diff with its PR text, run from `<repo>-worktrees/` (`delta` gives GitHub-like syntax highlighting; without it, `git log --color=always ... | less -R`):
 
 ```sh
 for d in <slug> ...; do echo "━━ $d"; cat $SCRATCH/PR-*-"$d".md; git -C "$d" log origin/<base>..HEAD -p --stat; done | delta --side-by-side
@@ -162,19 +192,20 @@ Wait for a yes, then:
 3. **Create the issues** with `scripts/ship.py <spec> create-issues`, assigned and labelled the way the person's own issues there are. Record the numbers in the spec as you go, so a crash doesn't cause duplicates.
 4. **Publish**: run `scripts/ship.py <spec> ship --dry-run` and read what it would do. Then run it on one fix, check the result (`gh pr view` with title, head, base, assignees, reviewers and commits), and run the rest. Where the spec says so it renames the branch and rewrites the commit subject (a message-only amend with hooks off, since the code already passed them); then it pushes and opens the PR with the title, labels, reviewers and assignee listed.
    - If the PR base isn't the default branch, GitHub won't link or auto-close from `Closes #N`. Tell the user; don't fight it.
+   - Then `kb.py import-ship $SCRATCH/ship.json`, so the next round's `sync` can read what the team does with each PR.
 5. **Project board** (only when the fixes have issues and the repository's issues sit on a board): `gh project list --owner <org>`. If the token lacks the `project` scope, ask the user to run `gh auth refresh -h github.com -s project` (it's interactive, so you can't do it for them). Then run `scripts/project_status.sh` with the status the person's earlier issues sit in, or the one they name, and read it back to confirm.
 6. **CI**: check every PR (`gh pr checks <n> --json name,state,link`). For failures, read `gh run view <run> --log-failed` before calling anything flaky. If it's infrastructure (e.g. `Failed to restore cache entry` when many PRs build at once), rerun the **whole** run (`gh run rerun <run>`). Rerunning only the failed jobs hits the same cache miss. If a real test fails, fix it on that branch.
-7. **Finish** with a markdown table: `| BUGS.md # | Issue link | PR link | Summary |` (no issue column when there are none). Offer to open the PRs in the browser (`google-chrome <urls...>` or `xdg-open`).
+7. **Finish** with a markdown table: `| # | Issue link | PR link | Summary |` (`#` is the NN) (no issue column when there are none). Offer to open the PRs in the browser (`google-chrome <urls...>` or `xdg-open`).
 
 ## Phase 6: Clean up the scratch files
 
-Once every PR is open and its body is on GitHub, the local copies are stale duplicates. Leaving them around confuses the next run, which might reuse an old `BUGS.md` or a spec whose issue numbers have already been used. Do this in the same turn as the final table, without waiting to be asked:
+Once every PR is open and its body is on GitHub, the local copies are stale duplicates. Leaving them around confuses the next run, which might reuse a spec whose issue numbers have already been used. The findings database is not a scratch file: never delete or move `~/.local/share/quick-wins/`. Do this in the same turn as the final table, without waiting to be asked:
 
 0. Before deleting anything, run `python3 -I scripts/check_evidence.py $SCRATCH --published` (add `-R org/name NN=<pr>` for PRs that `ship.py` didn't open). It reads each verified fix's PR body from GitHub and fails if its before and after pictures aren't in it. The scratch directory holds the only copies, so add any that are missing (`gh pr edit <n> --attach`) first.
 1. If phase 3.5 ran: `scripts/app_slot.sh status` must show none of this run's instances (stop any that are left), then remove the verification worktree (`git -C <repo> worktree remove --force <repo>-worktrees/verify`) and drop the throwaway database and delete the private settings copy you created for it. Do this even if the run stopped early.
 2. List what's there (`ls -la`) and check that each file belongs to this run.
 3. Remove the preview worktree first if you made one (`git -C <repo> worktree remove --force $SCRATCH/preview`), so git doesn't keep a dangling entry. It's throwaway and goes stale fast; remove it even if the run stopped early.
-4. Delete this run's scratch directory: `rm -rf $SCRATCH` (only this repo's subdirectory; another repo's run may be using its sibling). That covers `BUGS.md`, the `PR-NN-*.md` copies, the ship spec and any temp lists.
+4. Delete this run's scratch directory: `rm -rf $SCRATCH` (only this repo's subdirectory; another repo's run may be using its sibling). That covers the `PR-NN-*.md` copies, the ship spec, the seed batches and any temp lists.
 5. Confirm with an `ls` that they're gone. In zsh, check with `ls | grep` rather than a bare glob, because an unmatched glob is an error there.
 6. Remove the fix worktrees and their local branches too: once a PR is open, its branch lives on GitHub, so the local copy is just clutter. For each one, first check that it's clean (`git status --porcelain` is empty) and that `HEAD` equals `origin/<branch>`; skip and report any that aren't. Then `git worktree remove <dir>` plus `git branch -D <branch>`, and `rmdir <repo>-worktrees` once it's empty. Never touch the remote branches or the PRs. Tell the user how to bring one back if a reviewer asks for changes: `git -C <repo> worktree add <repo>-worktrees/<slug> <branch>` (after `git fetch`).
 

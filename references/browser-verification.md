@@ -4,7 +4,7 @@ Read this before starting any app instance. It covers which fixes to check, how 
 
 ## 1. Pick the fixes worth checking
 
-A browser check costs minutes and memory, so spend it where reading code is weakest or where being wrong would hurt users. Tag each surviving fix in `BUGS.md` with `verify:`:
+A browser check costs minutes and memory, so spend it where reading code is weakest or where being wrong would hurt users. Each surviving fix carries a `verify` tag in the findings database, set in phase 1 (`kb.py list --verify ui,http` lists the ones to check):
 
 - `ui`: the bug or the fix is visible on a page (missing text, wrong state, broken button, wrong redirect). Check these.
 - `http`: a public endpoint or webhook whose response changes. Check these with a real HTTP client.

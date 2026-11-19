@@ -9,7 +9,7 @@ Usage:
 
 Reads <scratch-dir>/evidence/checks.tsv, one line per fix that survived phase 3:
   NN  slug  tag  outcome  reason...
-  tag:      ui | http | none          the `verify:` tag from BUGS.md
+  tag:      ui | http | none          the finding's `verify` tag (kb.py show NN)
   outcome:  verified                  bug seen on the base and gone with the fix, as a user
             not-verified <reason>     anything else: not reproduced, can't be reached as a user,
                                       app not run, a capture that failed
