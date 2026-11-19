@@ -206,8 +206,8 @@ The database is the only list of findings; nothing writes `$SCRATCH/BUGS.md`. It
 `NN` stays the key for `PR-NN-<slug>.md`, `checks.tsv`, evidence files and `ship.json`, so `check_evidence.py`
 and `ship.py` keep working; only their comments that mention `BUGS.md` change. SKILL.md (lines 3, 12, 82,
 89, 167, 171, 177) and `references/browser-verification.md` (line 7) lose their `BUGS.md` mentions.
-*My call:* the description keeps "a BUGS.md" as a trigger phrase, since people may still ask for one by
-that name; the skill then answers with `kb.py list`.
+The description drops "a BUGS.md" as a trigger phrase too; no backward compatibility with the file
+(decided by the person).
 
 ### Changes per phase
 - **0:** `round start`, `sync`, `seed` (when due), `stats`.
