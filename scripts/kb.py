@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from kblib import check, findings, ingest, store, sync  # noqa: E402
+from kblib import check, findings, ingest, seed, store, sync  # noqa: E402
 
 
 def read_json(path):
@@ -89,6 +89,17 @@ def cmd_import_ship(args):
 
 def cmd_sync(args):
     print(json.dumps(sync.sync(store.connect(args.repo), args.repo, args.base)))
+
+
+def cmd_seed(args):
+    conn = store.connect(args.repo)
+    if args.action == 'prepare':
+        n = seed.prepare(conn, args.repo, args.base, args.scratch, args.fix_regex)
+        print(f'{n} batch file(s) in {os.path.join(args.scratch, "seed")}' + (' (see README.txt there)' if n else ''))
+    elif args.action == 'load':
+        print(f'{seed.load(conn, args.repo, args.scratch)} seeds added')
+    else:
+        print(seed.status(conn, args.repo, args.scratch))
 
 
 def cmd_list(args):
@@ -168,6 +179,13 @@ def build_parser():
     s = sub.add_parser('sync', help="read every open PR's fate from GitHub (phase 0); prints counts")
     s.add_argument('--base', required=True, help='the PR base branch, to look for reverts on origin/<base>')
     s.set_defaults(func=cmd_sync)
+
+    s = sub.add_parser('seed', help="seed from the repository's small fix commits (phase 0)")
+    s.add_argument('action', choices=('prepare', 'load', 'status'))
+    s.add_argument('--base', help='prepare: the PR base branch')
+    s.add_argument('--scratch', help='the run scratch directory; batches go in <scratch>/seed/')
+    s.add_argument('--fix-regex', help="prepare: subjects that mark a fix (default: fix|bug|typo|hotfix words)")
+    s.set_defaults(func=cmd_seed)
 
     s = sub.add_parser('list', help="this round's findings, grouped by kind")
     s.add_argument('--runners-up', action='store_true')

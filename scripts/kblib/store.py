@@ -90,6 +90,7 @@ CREATE TRIGGER findings_au AFTER UPDATE ON findings BEGIN
   INSERT INTO findings_fts(rowid, root_cause, reason, snippet, path)
   VALUES (new.id, new.root_cause, new.reason, new.snippet, new.path);
 END;
+CREATE TABLE seed_seen (commit_sha TEXT PRIMARY KEY, skipped INTEGER NOT NULL, seen TEXT NOT NULL);
 CREATE TABLE rules (
   id TEXT PRIMARY KEY,
   engine TEXT NOT NULL, kind TEXT, pattern TEXT, file TEXT NOT NULL,
