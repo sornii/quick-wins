@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from kblib import check, findings, store  # noqa: E402
+from kblib import check, findings, ingest, store  # noqa: E402
 
 
 def read_json(path):
@@ -77,6 +77,14 @@ def cmd_check(args):
     for i, r in enumerate(results):
         print(json.dumps({'i': i, **r}))
     print(check.summary(results))
+
+
+def cmd_import_checks(args):
+    print(ingest.import_checks(store.connect(args.repo), args.tsv))
+
+
+def cmd_import_ship(args):
+    print(ingest.import_ship(store.connect(args.repo), args.spec))
 
 
 def cmd_list(args):
@@ -144,6 +152,14 @@ def build_parser():
     s = sub.add_parser('check', help='which candidates are already known (strong = skip; weak = look at it)')
     s.add_argument('candidates', help='JSON list with path, snippet, root_cause; run with -C <the checkout hunted>')
     s.set_defaults(func=cmd_check)
+
+    s = sub.add_parser('import-checks', help="record phase 3.5's evidence/checks.tsv; prints the count")
+    s.add_argument('tsv')
+    s.set_defaults(func=cmd_import_checks)
+
+    s = sub.add_parser('import-ship', help='record the PRs ship.py opened (ship.json); prints the count')
+    s.add_argument('spec')
+    s.set_defaults(func=cmd_import_ship)
 
     s = sub.add_parser('list', help="this round's findings, grouped by kind")
     s.add_argument('--runners-up', action='store_true')
