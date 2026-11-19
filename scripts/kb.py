@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from kblib import brief, check, findings, ingest, seed, stats, store, sync  # noqa: E402
+from kblib import brief, check, findings, hotspots, ingest, seed, stats, store, sync  # noqa: E402
 
 
 def read_json(path):
@@ -122,6 +122,21 @@ def cmd_supersede(args):
     brief.supersede(store.connect(args.repo), args.ref, args.by)
 
 
+def cmd_hotspots(args):
+    conn = store.connect(args.repo)
+    print(json.dumps(hotspots.hotspots(conn, args.repo, args.base, store.load_config(args.repo), args.top)))
+
+
+def cmd_hunters(args):
+    conn = store.connect(args.repo)
+    rd = need_round(conn)
+    areas = [a.strip() for a in args.areas.split(',') if a.strip()] if args.areas else hotspots.round_areas(conn)
+    if not areas:
+        raise ValueError('no areas: pass --areas, or give them to `round start`')
+    plan = hotspots.plan_hunters(conn, store.load_config(args.repo), rd['id'], areas, hot_paths(args.hot_from) or [])
+    print(json.dumps(plan, indent=1))
+
+
 def cmd_list(args):
     conn = store.connect(args.repo)
     verify = set(args.verify.split(',')) if args.verify else None
@@ -220,6 +235,16 @@ def build_parser():
     s.add_argument('ref', help='#id (or NN of this round)')
     s.add_argument('--by', help='the finding that replaces it')
     s.set_defaults(func=cmd_supersede)
+
+    s = sub.add_parser('hotspots', help='files that changed most lately, weighted by past bugs (JSON)')
+    s.add_argument('--base', required=True)
+    s.add_argument('--top', type=int, default=20)
+    s.set_defaults(func=cmd_hotspots)
+
+    s = sub.add_parser('hunters', help="this round's hunter plan: exploring areas, hot files, kinds (JSON)")
+    s.add_argument('--areas', help="default: the areas given to `round start`")
+    s.add_argument('--hot-from', metavar='FILE', help='JSON from `kb.py hotspots`')
+    s.set_defaults(func=cmd_hunters)
 
     s = sub.add_parser('list', help="this round's findings, grouped by kind")
     s.add_argument('--runners-up', action='store_true')
