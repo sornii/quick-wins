@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from kblib import findings, store  # noqa: E402
+from kblib import check, findings, store  # noqa: E402
 
 
 def read_json(path):
@@ -65,6 +65,18 @@ def cmd_update(args):
         'kind': args.kind,
     }.items() if v is not None}
     findings.update_finding(conn, args.ref, **fields)
+
+
+def cmd_check(args):
+    conn = store.connect(args.repo)
+    need_round(conn)
+    items = read_json(args.candidates)
+    if not isinstance(items, list):
+        raise ValueError('expected a JSON list of candidates')
+    results = check.check_candidates(conn, args.repo, items, findings.memory_on(conn))
+    for i, r in enumerate(results):
+        print(json.dumps({'i': i, **r}))
+    print(check.summary(results))
 
 
 def cmd_list(args):
@@ -128,6 +140,10 @@ def build_parser():
     s.add_argument('--pattern')
     s.add_argument('--kind')
     s.set_defaults(func=cmd_update)
+
+    s = sub.add_parser('check', help='which candidates are already known (strong = skip; weak = look at it)')
+    s.add_argument('candidates', help='JSON list with path, snippet, root_cause; run with -C <the checkout hunted>')
+    s.set_defaults(func=cmd_check)
 
     s = sub.add_parser('list', help="this round's findings, grouped by kind")
     s.add_argument('--runners-up', action='store_true')
