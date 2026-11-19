@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from kblib import check, findings, ingest, seed, stats, store, sync  # noqa: E402
+from kblib import brief, check, findings, ingest, seed, stats, store, sync  # noqa: E402
 
 
 def read_json(path):
@@ -104,6 +104,22 @@ def cmd_seed(args):
 
 def cmd_stats(args):
     print(stats.format_stats(stats.round_stats(store.connect(args.repo), args.rounds)), end='')
+
+
+def hot_paths(path):
+    if not path:
+        return None
+    data = read_json(path)
+    return [p[0] if isinstance(p, list) else p for p in data]
+
+
+def cmd_brief(args):
+    conn = store.connect(args.repo)
+    print(brief.brief(conn, args.repo, store.load_config(args.repo), args.role, hot_paths(args.hot_from)), end='')
+
+
+def cmd_supersede(args):
+    brief.supersede(store.connect(args.repo), args.ref, args.by)
 
 
 def cmd_list(args):
@@ -194,6 +210,16 @@ def build_parser():
     s = sub.add_parser('stats', help='how the last rounds went (phase 0 update)')
     s.add_argument('--rounds', type=int, default=5)
     s.set_defaults(func=cmd_stats)
+
+    s = sub.add_parser('brief', help='memory lines to paste into a hunter or prosecutor prompt (empty when off)')
+    s.add_argument('--role', choices=('hunter', 'prosecutor'), required=True)
+    s.add_argument('--hot-from', metavar='FILE', help='JSON from `kb.py hotspots`, or a list of paths')
+    s.set_defaults(func=cmd_brief)
+
+    s = sub.add_parser('supersede', help='retire a lesson that stopped being true')
+    s.add_argument('ref', help='#id (or NN of this round)')
+    s.add_argument('--by', help='the finding that replaces it')
+    s.set_defaults(func=cmd_supersede)
 
     s = sub.add_parser('list', help="this round's findings, grouped by kind")
     s.add_argument('--runners-up', action='store_true')
