@@ -6,7 +6,8 @@ Status: draft for approval. Date: 2026-11-19.
 
 Every run of the skill starts from nothing. It re-finds bugs an earlier round already shipped, re-verifies
 false positives an earlier round already dropped (with the same reasons), and never learns which kinds of
-bugs a team actually accepts. Its only memory is `$SCRATCH/BUGS.md`, which phase 6 deletes.
+bugs a team actually accepts. Its only memory is `$SCRATCH/BUGS.md`, which phase 6 deletes. This design
+replaces that file with the database.
 
 This design gives each repository a local database of every finding and what happened to it, and uses it to:
 
@@ -73,7 +74,7 @@ It stays useful alongside A: a finding can carry the graph's qualified symbol na
 - Phase 6 never touches this folder.
 
 ### Records
-`findings`: `id`, `round_id`, `kind`, `pattern` (a short slug for the root cause within the kind, e.g.
+`findings`: `id`, `round_id`, `nn` (this round's two-digit number), `slug`, `in_batch`, `verify`, `kind`, `pattern` (a short slug for the root cause within the kind, e.g.
 `missing-await/collection-result-used`), `root_cause` (one sentence: why it is wrong), `path`, `symbol`,
 `snippet`, `snippet_hash` (whitespace-normalised), `context_hash`, `base_sha`, `fix_diff`, `source`
 (`hunter:hot`, `hunter:explore`, `hunter:kind`, `rule:<id>`, `seed`), `outcome`, `outcome_phase`,
@@ -193,11 +194,26 @@ commit in the skill's repository.
   `brief` prints nothing, rules don't run and the hunter split ignores steering. Stats separate on/off rounds.
 - `config.json` holds every number above; `kb.py` has the defaults.
 
+### `BUGS.md` is gone (decided by the person)
+The database is the only list of findings; nothing writes `$SCRATCH/BUGS.md`. Its jobs move:
+| Was | Now |
+|---|---|
+| The orchestrator's round list, grouped by kind, runners-up apart | `kb.py list [--round current] [--runners-up]`, printed, same grouping |
+| A fix agent's prompt quoting its item | `kb.py show NN` pasted into the prompt by the orchestrator (fix agents may also run it) |
+| The `verify:` tag read in phase 3.5 | `verify` field; `kb.py list --verify ui,http` gives phase 3.5 its work list |
+| `BUGS.md #` in the phase 5 table | `#` column with `NN` |
+| What the person reads to review a round | `kb.py list` output in the phase update, and the diff review command at the phase 5 stop |
+`NN` stays the key for `PR-NN-<slug>.md`, `checks.tsv`, evidence files and `ship.json`, so `check_evidence.py`
+and `ship.py` keep working; only their comments that mention `BUGS.md` change. SKILL.md (lines 3, 12, 82,
+89, 167, 171, 177) and `references/browser-verification.md` (line 7) lose their `BUGS.md` mentions.
+*My call:* the description keeps "a BUGS.md" as a trigger phrase, since people may still ask for one by
+that name; the skill then answers with `kb.py list`.
+
 ### Changes per phase
 - **0:** `round start`, `sync`, `seed` (when due), `stats`.
 - **1:** `rules run` → `hotspots` → hunters (with `brief`) → `check` → orchestrator verification → `add`
-  every candidate with its outcome. `BUGS.md` becomes a view: `kb.py bugs-md` renders this round's
-  confirmed findings in today's format, so later phases and the person read it unchanged.
+  every candidate with its outcome. Each confirmed finding gets this round's two-digit number `NN` and its
+  `verify` tag (`ui` / `http` / `none`) in the database; runners-up are confirmed with `in_batch = 0`.
 - **2:** fix agents' results: `fixed` + `fix_diff`, or `dropped:<why>` with phase 2.
 - **3:** drops with reasons (phase 3); the prosecutor's prompt gets `brief`.
 - **3.5:** `kb.py import-checks $SCRATCH/evidence/checks.tsv`.
@@ -215,8 +231,8 @@ folder (the data folder location must be overridable for this). With that, all f
 one sitting; real rounds on a repository afterwards confirm the behavior and tune the config numbers.
 The "Done when" lines below are what the tests prove.
 
-1. **Database, outcomes, seed.** `init`, `round`, `add`, `check`, `sync`, `import-checks`, `import-ship`,
-   `bugs-md`, `seed`, `stats`, and the SKILL.md phase hooks.
+1. **Database, outcomes, seed.** `init`, `round`, `add`, `check`, `list`, `show`, `sync`, `import-checks`,
+   `import-ship`, `seed`, `stats`, the SKILL.md phase hooks, and removing `BUGS.md` everywhere.
    Done when: a round's findings land in the database; the next round's `sync` marks a merged and a closed
    PR correctly; a strong match from an earlier round is skipped before verification; `seed` loads a repo's
    history within its limit.
@@ -240,4 +256,3 @@ ask when unsure, only essential comments, one commit per step.
 - The exact `kb.py` subcommand flags and JSON shapes, and how output is formatted for prompts.
 - The graphql query for `sync`, and trimming of review comments.
 - Normalising snippets for hashing; the formatter-sweep subject patterns; path exclusion lists.
-- Whether to offer a one-off import of a leftover `$SCRATCH/BUGS.md` from before this feature.
