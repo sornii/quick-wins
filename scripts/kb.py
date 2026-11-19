@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from kblib import check, findings, ingest, seed, store, sync  # noqa: E402
+from kblib import check, findings, ingest, seed, stats, store, sync  # noqa: E402
 
 
 def read_json(path):
@@ -100,6 +100,10 @@ def cmd_seed(args):
         print(f'{seed.load(conn, args.repo, args.scratch)} seeds added')
     else:
         print(seed.status(conn, args.repo, args.scratch))
+
+
+def cmd_stats(args):
+    print(stats.format_stats(stats.round_stats(store.connect(args.repo), args.rounds)), end='')
 
 
 def cmd_list(args):
@@ -186,6 +190,10 @@ def build_parser():
     s.add_argument('--scratch', help='the run scratch directory; batches go in <scratch>/seed/')
     s.add_argument('--fix-regex', help="prepare: subjects that mark a fix (default: fix|bug|typo|hotfix words)")
     s.set_defaults(func=cmd_seed)
+
+    s = sub.add_parser('stats', help='how the last rounds went (phase 0 update)')
+    s.add_argument('--rounds', type=int, default=5)
+    s.set_defaults(func=cmd_stats)
 
     s = sub.add_parser('list', help="this round's findings, grouped by kind")
     s.add_argument('--runners-up', action='store_true')
