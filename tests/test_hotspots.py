@@ -92,6 +92,41 @@ class PlanTest(DataDirCase, unittest.TestCase):
         p = self.plan(memory='off')
         self.assertEqual(p, {'explore': self.areas, 'hot': [], 'kind': []})
 
+    def results(self, kind, merged, dropped):
+        rid = findings.start_round(self.conn, 'main', 'x', 'on', {}, self.areas)
+        items = [{'kind': kind, 'root_cause': 'r', 'path': 'p', 'snippet': f'{kind}{i}', 'source': 'hunter:explore',
+                  'outcome': 'merged'} for i in range(merged)]
+        items += [{'kind': kind, 'root_cause': 'r', 'path': 'p', 'snippet': f'{kind}d{i}', 'source': 'hunter:explore',
+                   'outcome': 'dropped:false-positive', 'outcome_phase': '1'} for i in range(dropped)]
+        findings.add_findings(self.conn, self.repo, rid, items)
+
+    def steered(self, memory='on'):
+        rid = findings.start_round(self.conn, 'main', 'x', memory, {}, self.areas)
+        return hotspots.plan_for_round(self.conn, self.cfg, rid, self.areas, self.hot)
+
+    def test_kind_hunters_follow_rates(self):
+        self.results('visible-typo', 5, 0)
+        self.results('missing-await', 1, 4)
+        self.results('wrong-i18n-key', 3, 1)
+        # rates: typo 6/7, i18n 4/6, await 2/7; one kind hunter takes the top two
+        self.assertEqual(self.steered()['kind'], [['visible-typo', 'wrong-i18n-key']])
+
+    def test_unknown_kinds_not_focused(self):
+        self.results('visible-typo', 2, 0)
+        self.assertEqual(self.steered()['kind'], [])
+
+    def test_explore_share_fixed_with_stats(self):
+        for k in ('visible-typo', 'missing-await', 'wrong-i18n-key', 'wrong-log-level'):
+            self.results(k, 4, 0)
+        p = self.steered()
+        self.assertEqual(len(p['explore']), 2)
+        self.assertEqual(len(p['hot']) + len(p['kind']), 3)
+        self.assertEqual((len(p['hot']), len(p['kind'])), (2, 1))
+
+    def test_memory_off_ignores_rates(self):
+        self.results('visible-typo', 5, 0)
+        self.assertEqual(self.steered(memory='off'), {'explore': self.areas, 'hot': [], 'kind': []})
+
     def test_cli(self):
         commit(self.repo, 'src/a.js', 'a\n', 'Add a')
         publish(self.repo)

@@ -115,7 +115,9 @@ def hot_paths(path):
 
 def cmd_brief(args):
     conn = store.connect(args.repo)
-    print(brief.brief(conn, args.repo, store.load_config(args.repo), args.role, hot_paths(args.hot_from)), end='')
+    cfg = store.load_config(args.repo)
+    kinds = stats.ranked_kinds(conn, cfg)[:5] if args.role == 'hunter' else None
+    print(brief.brief(conn, args.repo, cfg, args.role, hot_paths(args.hot_from), kinds), end='')
 
 
 def cmd_supersede(args):
@@ -133,7 +135,7 @@ def cmd_hunters(args):
     areas = [a.strip() for a in args.areas.split(',') if a.strip()] if args.areas else hotspots.round_areas(conn)
     if not areas:
         raise ValueError('no areas: pass --areas, or give them to `round start`')
-    plan = hotspots.plan_hunters(conn, store.load_config(args.repo), rd['id'], areas, hot_paths(args.hot_from) or [])
+    plan = hotspots.plan_for_round(conn, store.load_config(args.repo), rd['id'], areas, hot_paths(args.hot_from) or [])
     print(json.dumps(plan, indent=1))
 
 

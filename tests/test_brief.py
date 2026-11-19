@@ -49,6 +49,11 @@ class BriefTest(DataDirCase, unittest.TestCase):
         self.assertNotIn('lesson 0\n', out)
         self.assertIn('b.js', out)
 
+    def test_brief_names_kinds_without_numbers(self):
+        out = brief.brief(self.conn, self.repo, self.cfg, 'hunter', None, ['visible-typo', 'wrong-i18n-key'])
+        self.assertIn('accepted most here: visible-typo, wrong-i18n-key', out)
+        self.assertNotRegex(out, r'\d\.\d|%|\(\d')
+
     def test_brief_shows_hot_files(self):
         out = self.text(hot=['src/hot.js'])
         self.assertIn('src/hot.js', out)

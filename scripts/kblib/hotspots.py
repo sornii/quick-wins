@@ -5,7 +5,7 @@ import re
 import subprocess
 from collections import defaultdict
 
-from kblib import findings, seed
+from kblib import findings, seed, stats
 
 SWEEP = re.compile(r'(?i)\b(prettier|eslint\s+--fix|format(ting)?|reformat|lint(ing)?\s+fix(es)?|codemod)\b')
 REAL_BUGS = ('seed', 'confirmed', 'fixed', 'shipped', 'merged', 'reverted', 'closed')
@@ -73,11 +73,17 @@ def plan_hunters(conn, cfg, round_id, areas, hot, kinds=None):
         last = _last_explored(conn, round_id, areas)
         order = sorted(areas, key=lambda a: (last[a], areas.index(a)))
         hot_lists = [hot[i::hot_n] for i in range(hot_n)] if hot_n else []
-        kind_lists = [kinds[i::kind_n] for i in range(kind_n)] if kind_n else []
+        top = kinds[:kind_n * 2]
+        kind_lists = [top[i::kind_n] for i in range(kind_n)] if kind_n else []
         plan = {'explore': order[:explore_n], 'hot': hot_lists, 'kind': kind_lists}
     conn.execute('UPDATE rounds SET areas_explored = ? WHERE id = ?', (json.dumps(plan['explore']), round_id))
     conn.commit()
     return plan
+
+
+def plan_for_round(conn, cfg, round_id, areas, hot):
+    """The plan with kind-focused hunters steered by merge rate (stats.ranked_kinds)."""
+    return plan_hunters(conn, cfg, round_id, areas, hot, stats.ranked_kinds(conn, cfg))
 
 
 def round_areas(conn):

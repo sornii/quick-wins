@@ -56,6 +56,13 @@ def format_stats(rows):
     return '\n'.join(lines) + '\n'
 
 
+def ranked_kinds(conn, cfg):
+    """Kinds with enough decided results, best merge rate first. Kinds below the bar are 'unknown'."""
+    rates = kind_rates(conn, cfg)
+    known = [(k, rate) for k, (rate, decided) in rates.items() if decided >= cfg['unknown_kind_min_decided']]
+    return [k for k, _ in sorted(known, key=lambda x: (-x[1], x[0]))]
+
+
 def kind_rates(conn, cfg):
     """{kind: (rate, decided)} with rate = (merged + 1) / (decided + 2); see the spec's Steering section."""
     w = cfg['seed_weight']
