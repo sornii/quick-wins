@@ -16,7 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from kblib import brief, check, findings, hotspots, ingest, seed, stats, store, sync  # noqa: E402
+from kblib import brief, check, findings, hotspots, ingest, rules, seed, stats, store, sync  # noqa: E402
 
 
 def read_json(path):
@@ -137,6 +137,34 @@ def cmd_hunters(args):
     print(json.dumps(plan, indent=1))
 
 
+def cmd_rules(args):
+    conn = store.connect(args.repo)
+    cfg = store.load_config(args.repo)
+    if args.action in ('add', 'test', 'run') and (not args.target or not args.scratch):
+        raise ValueError(f'rules {args.action} needs a {"checkout" if args.action == "run" else "file"} and --scratch')
+    if args.action == 'candidates':
+        print(json.dumps(rules.candidates(conn, cfg), indent=1))
+    elif args.action == 'test':
+        errors = rules.test_rule(conn, rules.load(args.target), args.scratch)
+        print('\n'.join(errors) or 'ok')
+        return 1 if errors else 0
+    elif args.action == 'add':
+        print(rules.add_rule(conn, args.repo, args.target, args.scratch))
+    elif args.action == 'run':
+        items = rules.run_rules(conn, args.repo, os.path.abspath(args.target), args.scratch)
+        out = os.path.join(args.scratch, 'rule-candidates.json')
+        with open(out, 'w') as f:
+            json.dump(items, f, indent=1)
+        print(f'{len(items)} rule hit(s) in {out}')
+    elif args.action == 'health':
+        off = rules.refresh_health(conn, cfg)
+        print('turned off: ' + ', '.join(off) if off else 'no rule turned off')
+    else:
+        for r in rules.listing(conn):
+            state = 'on' if r['active'] else 'off'
+            print(f'{r["id"]} [{state}] {r["kind"]}: hits {r["hits"]}, merged {r["merged"]}/{r["decided"]} decided')
+
+
 def cmd_list(args):
     conn = store.connect(args.repo)
     verify = set(args.verify.split(',')) if args.verify else None
@@ -245,6 +273,12 @@ def build_parser():
     s.add_argument('--areas', help="default: the areas given to `round start`")
     s.add_argument('--hot-from', metavar='FILE', help='JSON from `kb.py hotspots`')
     s.set_defaults(func=cmd_hunters)
+
+    s = sub.add_parser('rules', help='private rules: candidates, test, add, run, health, list')
+    s.add_argument('action', choices=('candidates', 'test', 'add', 'run', 'health', 'list'))
+    s.add_argument('target', nargs='?', help='test/add: the rule file; run: the checkout to scan')
+    s.add_argument('--scratch', help='the run scratch directory (rule hits and ast-grep cache go there)')
+    s.set_defaults(func=cmd_rules)
 
     s = sub.add_parser('list', help="this round's findings, grouped by kind")
     s.add_argument('--runners-up', action='store_true')
